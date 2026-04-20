@@ -1,4 +1,7 @@
 # detector.py
+# Author: Marco D'Amico <marcodamico@protonmail.com>
+# Copyright (c) 2026 Marco D'Amico
+
 import flickrapi
 import requests
 from io import BytesIO
@@ -28,6 +31,11 @@ class FlickrDetector:
         self.flickr.authenticate_via_browser(perms='delete')
         self.user_id = self.flickr.test.login()['user']['id']
         self.status = {"total": 0, "current": 0, "message": "Idle"}
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+        self.status["message"] = "Scan cancelled."
 
     def get_all_photos(self):
         # ... (unchanged)
@@ -48,6 +56,8 @@ class FlickrDetector:
         return photos
 
     def process_single_photo(self, p):
+        if self.cancelled:
+            return None
         # ... (rest of the file remains functionally the same, but I'll provide the start again)
         photo_id = p['id']
         cached = db.get_hash(photo_id)
@@ -99,6 +109,7 @@ class FlickrDetector:
         self.status["total"] = len(photos)
         self.status["current"] = 0
         self.status["message"] = "Hashing images..."
+        self.cancelled = False
 
         processed_photos = []
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -114,12 +125,14 @@ class FlickrDetector:
             count = 0
             for i, p1 in enumerate(processed_photos):
                 for j in range(i + 1, len(processed_photos)):
+                    if self.cancelled: break
                     p2 = processed_photos[j]
                     diff = p1['hash'] - p2['hash']
                     if diff < threshold:
                         duplicates.append(self.format_pair(p1, p2, diff))
                     count += 1
                     if count % 5000 == 0: self.status["current"] = count
+                if self.cancelled: break
                 self.status["current"] = count
         else:
             self.status["message"] = "Fast Scan: Comparing by date..."
@@ -130,10 +143,16 @@ class FlickrDetector:
             for date_key, group in groups.items():
                 if len(group) < 2: continue
                 for i in range(len(group)):
+                    if self.cancelled: break
                     for j in range(i + 1, len(group)):
                         diff = group[i]['hash'] - group[j]['hash']
                         if diff < threshold:
                             duplicates.append(self.format_pair(group[i], group[j], diff))
+                if self.cancelled: break
+
+        if self.cancelled:
+            self.status["message"] = "Scan cancelled."
+            return []
 
         self.status["message"] = "Scan complete."
         self.save_results(duplicates)

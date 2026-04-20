@@ -1,14 +1,14 @@
 # Flickr Duplicate Cleaner 🔍
 
-A professional-grade web application to find, compare, and remove visual duplicates from your Flickr library. Unlike simple filename matchers, this tool uses **Perceptual Hashing (pHash)** to find images that look the same even if they have different resolutions, compression, or missing metadata.
+A web application to find, compare, and remove visual duplicates from your Flickr library. Unlike simple filename matchers, this tool uses **Perceptual Hashing (pHash)** to find images that look the same even if they have different resolutions, compression, or missing metadata.
 
 ## Key Features
 
-- **Visual Comparison**: Uses AI-powered pHash to find visual similarities regardless of file size or format.
+- **Visual Comparison**: Uses pHash to find visual similarities regardless of file size or format.
 - **Choice-Based Review**: See photo resolutions (Width x Height & MP) side-by-side and choose exactly which version to keep.
 - **Deep Scan Mode**: Optionally ignore photo dates to find duplicates across your entire library (great for catching unsynced WhatsApp copies).
 - **Scalable Caching**: Persistent SQLite database ensures photos are only hashed once, making subsequent scans nearly instant.
-- **Parallel Processing**: Multi-threaded scanner dramatically speeds up the initial processing of large libraries.
+- **Parallel Processing**: Multi-threaded scanner speeds up the initial processing of large libraries.
 - **Public Ready & Secure**: Built with `python-dotenv` to keep your Flickr API secrets safe and out of your public repository.
 
 ## Getting Started
@@ -54,7 +54,7 @@ A professional-grade web application to find, compare, and remove visual duplica
 
 1. **Launch the Server**:
    ```bash
-   python3 app.py
+   python3 -m flask run
    ```
 2. **Access the UI**: Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your web browser.
 3. **Authenticate**: Follow the prompt to authorize the app on your Flickr account.
@@ -67,5 +67,13 @@ A professional-grade web application to find, compare, and remove visual duplica
 - **Image Processing**: Pillow, ImageHash
 - **Storage**: SQLite3
 - **Frontend**: Modern Vanilla CSS, Asynchronous JavaScript
+
+## Author
+
+**Marco D'Amico**
+Web: [marcodamico.github.io](https://marcodamico.github.io)
+Email: [marcodamico@protonmail.com](mailto:marcodamico@protonmail.com)
+
+&copy; 2026 Marco D'Amico. All rights reserved.
 
 ---

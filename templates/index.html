@@ -1,6 +1,7 @@
 <!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -19,14 +21,16 @@
             </div>
             <div class="controls">
                 <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-                    <label style="font-size: 0.75rem; color: var(--text-dim); font-weight: 600;">SIMILARITY LEVEL</label>
+                    <label style="font-size: 0.75rem; color: var(--text-dim); font-weight: 600;">SIMILARITY
+                        LEVEL</label>
                     <div style="display: flex; gap: 0.5rem; align-items: center;">
                         <input type="number" id="threshold" value="5" min="1" max="64">
                         <span style="font-size: 0.75rem; color: var(--text-dim);">(5=Exact, 15=Similar)</span>
                     </div>
                 </div>
-                
-                <label class="checkbox-container" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; margin-top: 1rem;">
+
+                <label class="checkbox-container"
+                    style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; margin-top: 1rem;">
                     <input type="checkbox" id="globalSearch"> Search Entire Library (Slow)
                 </label>
 
@@ -42,13 +46,25 @@
                 <div id="progressBarFill" class="progress-bar-fill"></div>
             </div>
             <div id="status-msg">Initializing...</div>
+            <button id="cancelBtn" class="secondary" style="margin-top: 1rem; width: 100%;"
+                onclick="cancelScan()">Cancel Scan</button>
         </div>
 
         <main id="container">
             <!-- Pairs will be injected here -->
         </main>
+
+        <footer
+            style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--text-dim); font-size: 0.875rem;">
+            <p>&copy; 2026 Marco D'Amico. All rights reserved.</p>
+            <p>Author: <strong>Marco D'Amico</strong> | <a href="https://marcodamico.github.io"
+                    style="color: var(--secondary); text-decoration: none;">marcodamico.github.io</a> | <a
+                    href="mailto:marcodamico@protonmail.com"
+                    style="color: var(--secondary); text-decoration: none;">marcodamico@protonmail.com</a></p>
+        </footer>
     </div>
 
     <script src="/static/app.js"></script>
 </body>
+
 </html>

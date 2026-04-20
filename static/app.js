@@ -1,4 +1,6 @@
 // static/app.js
+// Author: Marco D'Amico <marcodamico@protonmail.com>
+// Copyright (c) 2026 Marco D'Amico
 
 const statusEl = document.getElementById("status");
 const scanBtn = document.getElementById("scanBtn");
@@ -30,7 +32,7 @@ function formatRes(w, h) {
 
 function renderPairs(data) {
     mainContainer.innerHTML = "";
-    
+
     if (data.length === 0) {
         mainContainer.innerHTML = `<div style="text-align: center; padding: 3rem; color: #94a3b8;">No duplicates found. Try starting a new scan with a higher threshold or enabling Deep Scan.</div>`;
         return;
@@ -74,25 +76,30 @@ function renderPairs(data) {
 async function startScan() {
     const threshold = parseInt(thresholdEl.value);
     const global_search = globalSearchEl.checked;
-    
+
     scanBtn.disabled = true;
     scanBtn.classList.add("loading");
     statusEl.innerHTML = "<span>🔄</span> Initializing scan...";
     progressContainer.style.display = "block";
-    
+
     try {
         const res = await fetch("/api/scan", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({threshold, global_search})
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ threshold, global_search })
         });
         const data = await res.json();
-        
+
         if (data.status === "started") {
             startPolling();
         } else if (data.error) {
-            alert("Scan failed: " + data.error);
-            resetUI();
+            if (data.error === "Scan already in progress") {
+                // If it's already running, just start polling
+                startPolling();
+            } else {
+                alert("Scan failed: " + data.error);
+                resetUI();
+            }
         }
     } catch (e) {
         console.error(e);
@@ -103,14 +110,14 @@ async function startScan() {
 
 function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
-    
+
     pollInterval = setInterval(async () => {
         try {
             const res = await fetch("/api/status");
             const status = await res.json();
-            
+
             updateProgress(status);
-            
+
             if (status.message === "Scan complete.") {
                 clearInterval(pollInterval);
                 finishScan();
@@ -128,14 +135,39 @@ function startPolling() {
 function updateProgress(status) {
     const percent = status.total > 0 ? (status.current / status.total) * 100 : 0;
     progressBarFill.style.width = `${percent}%`;
-    
+
     let displayMsg = status.message;
     if (status.total > 0) {
         displayMsg += ` (${Math.round(percent)}%)`;
     }
-    
+
     statusMsg.innerText = displayMsg;
     statusEl.innerText = status.message;
+
+    // Ensure buttons reflect the running state
+    if (status.is_running) {
+        scanBtn.disabled = true;
+        scanBtn.classList.add("loading");
+        progressContainer.style.display = "block";
+    }
+}
+
+async function cancelScan() {
+    if (!confirm("Are you sure you want to cancel the current scan?")) return;
+
+    const cancelBtn = document.getElementById("cancelBtn");
+    cancelBtn.disabled = true;
+    cancelBtn.innerText = "Cancelling...";
+
+    try {
+        await fetch("/api/cancel", { method: "POST" });
+        // Resetting UI will happen via polling if it's still running, 
+        // or we can wait for the status to change.
+    } catch (e) {
+        console.error("Cancel error:", e);
+        cancelBtn.disabled = false;
+        cancelBtn.innerText = "Cancel Scan";
+    }
 }
 
 async function finishScan() {
@@ -144,6 +176,10 @@ async function finishScan() {
     scanBtn.disabled = false;
     scanBtn.classList.remove("loading");
     statusEl.innerText = "Scan complete. Review the results below.";
+
+    const cancelBtn = document.getElementById("cancelBtn");
+    cancelBtn.disabled = false;
+    cancelBtn.innerText = "Cancel Scan";
 }
 
 function resetUI() {
@@ -151,6 +187,10 @@ function resetUI() {
     scanBtn.disabled = false;
     scanBtn.classList.remove("loading");
     statusEl.innerText = "Ready to scan.";
+
+    const cancelBtn = document.getElementById("cancelBtn");
+    cancelBtn.disabled = false;
+    cancelBtn.innerText = "Cancel Scan";
 }
 
 async function deletePhoto(id, btn, rowId) {
@@ -162,8 +202,8 @@ async function deletePhoto(id, btn, rowId) {
     try {
         const res = await fetch("/api/delete", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({photo_id: id})
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ photo_id: id })
         });
         const data = await res.json();
 
@@ -187,4 +227,18 @@ async function deletePhoto(id, btn, rowId) {
     }
 }
 
+async function checkInitialStatus() {
+    try {
+        const res = await fetch("/api/status");
+        const status = await res.json();
+
+        if (status.is_running) {
+            startPolling();
+        }
+    } catch (e) {
+        console.error("Initial status check failed:", e);
+    }
+}
+
 loadDuplicates();
+checkInitialStatus();

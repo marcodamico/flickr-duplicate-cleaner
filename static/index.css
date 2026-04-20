@@ -1,7 +1,12 @@
 /* static/index.css */
+/* Author: Marco D'Amico <marcodamico@protonmail.com> */
+/* Copyright (c) 2026 Marco D'Amico */
+
 :root {
-  --primary: #ff0084; /* Flickr pink */
-  --secondary: #0063dc; /* Flickr blue */
+  --primary: #ff0084;
+  /* Flickr pink */
+  --secondary: #0063dc;
+  /* Flickr blue */
   --bg: #0f172a;
   --panel: #1e293b;
   --text: #f8fafc;
@@ -147,9 +152,21 @@ input[type="number"] {
   border-radius: 4px;
 }
 
-.badge.keep { background: rgba(16, 185, 129, 0.2); color: var(--success); }
-.badge.candidate { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
-.badge.secondary { background: rgba(0, 99, 220, 0.2); color: var(--secondary); border: 1px solid rgba(0, 99, 220, 0.3); }
+.badge.keep {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success);
+}
+
+.badge.candidate {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger);
+}
+
+.badge.secondary {
+  background: rgba(0, 99, 220, 0.2);
+  color: var(--secondary);
+  border: 1px solid rgba(0, 99, 220, 0.3);
+}
 
 .diff-tag {
   position: absolute;
@@ -174,8 +191,15 @@ input[type="number"] {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 [disabled] {

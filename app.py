@@ -1,4 +1,7 @@
 # app.py
+# Author: Marco D'Amico <marcodamico@protonmail.com>
+# Copyright (c) 2026 Marco D'Amico
+
 from flask import Flask, render_template, jsonify, request
 import json
 import threading
@@ -51,7 +54,14 @@ def scan_duplicates():
 
 @app.route("/api/status")
 def get_status():
-    return jsonify(detector.status)
+    status = detector.status.copy()
+    status["is_running"] = scan_thread is not None and scan_thread.is_alive()
+    return jsonify(status)
+
+@app.route("/api/cancel", methods=["POST"])
+def cancel_scan():
+    detector.cancel()
+    return jsonify({"status": "cancelling"})
 
 @app.route("/api/delete", methods=["POST"])
 def delete_photo():

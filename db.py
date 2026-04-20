@@ -1,4 +1,7 @@
 # db.py
+# Author: Marco D'Amico <marcodamico@protonmail.com>
+# Copyright (c) 2026 Marco D'Amico
+
 import sqlite3
 import os
 
