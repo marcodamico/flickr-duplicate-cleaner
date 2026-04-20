@@ -6,6 +6,7 @@ from flask import Flask, render_template, jsonify, request
 import json
 import threading
 import os
+import signal
 from detector import FlickrDetector
 import db
 from dotenv import load_dotenv
@@ -50,7 +51,11 @@ def scan_duplicates():
     if scan_thread and scan_thread.is_alive():
         return jsonify({"error": "Scan already in progress"}), 400
         
-    scan_thread = threading.Thread(target=run_scan_in_background, args=(threshold, global_search, use_cache))
+    scan_thread = threading.Thread(
+        target=run_scan_in_background,
+        args=(threshold, global_search, use_cache),
+        daemon=True  # Dies automatically when main process exits
+    )
     scan_thread.start()
     return jsonify({"status": "started"})
 
@@ -75,5 +80,13 @@ def delete_photo():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _handle_shutdown(signum, frame):
+    """Cancel any running scan before exiting so threads can stop cleanly."""
+    print("\nShutting down: cancelling scan...")
+    detector.cancel()
+
+signal.signal(signal.SIGINT, _handle_shutdown)
+signal.signal(signal.SIGTERM, _handle_shutdown)
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)

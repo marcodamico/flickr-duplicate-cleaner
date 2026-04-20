@@ -37,6 +37,7 @@ class FlickrDetector:
         self.status = {"total": 0, "current": 0, "message": "Idle"}
         self.cancelled = False
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()  # Set on cancel/shutdown to interrupt sleeps
         # Global rate limiter: minimum 0.25s between requests across all workers
         self._rate_lock = threading.Lock()
         self._last_request_time = 0.0
@@ -59,12 +60,13 @@ class FlickrDetector:
             now = time.time()
             wait = max(0.0, self._last_request_time + 0.25 - now)
             if wait > 0:
-                time.sleep(wait)
+                self._stop_event.wait(timeout=wait)  # Interruptible sleep
             self._last_request_time = time.time()
         return self.session.get(url, **kwargs)
 
     def cancel(self):
         self.cancelled = True
+        self._stop_event.set()  # Wake up any sleeping threads immediately
         self.status["message"] = "Scan cancelled."
 
     def get_all_photos(self):
@@ -130,7 +132,7 @@ class FlickrDetector:
                 if resp.status_code == 429:
                     wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
                     print(f"Rate limited on {photo_id}, waiting {wait}s (attempt {attempt + 1})")
-                    time.sleep(wait)
+                    self._stop_event.wait(timeout=wait)  # Interruptible sleep
                 else:
                     break
             
@@ -190,6 +192,7 @@ class FlickrDetector:
         self.status["current"] = 0
         self.status["message"] = "Hashing images..."
         self.cancelled = False
+        self._stop_event.clear()  # Reset stop signal for this new scan
 
         processed_photos = []
         with ThreadPoolExecutor(max_workers=4) as executor:
