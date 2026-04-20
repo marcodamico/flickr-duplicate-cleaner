@@ -58,7 +58,7 @@ class FlickrDetector:
         """Enforce a minimum gap between requests to avoid triggering CDN rate limits."""
         with self._rate_lock:
             now = time.time()
-            wait = max(0.0, self._last_request_time + 0.25 - now)
+            wait = max(0.0, self._last_request_time + 0.5 - now)  # Max 2 req/s globally
             if wait > 0:
                 self._stop_event.wait(timeout=wait)  # Interruptible sleep
             self._last_request_time = time.time()
@@ -109,7 +109,9 @@ class FlickrDetector:
         best_url = None
         width = 0
         height = 0
-        for suffix in ['o', 'k', 'b', 'm']:
+        # Prefer smaller sizes: phash downscales to 8x8 anyway, and smaller files
+        # are far less likely to trigger Flickr CDN rate limiting than originals.
+        for suffix in ['m', 'b', 'k', 'o']:
             url = p.get(f'url_{suffix}')
             if url:
                 best_url = url
