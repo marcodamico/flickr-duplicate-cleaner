@@ -15,6 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 import db
 import itertools
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Load environment variables from .env
 load_dotenv()
@@ -32,6 +34,18 @@ class FlickrDetector:
         self.user_id = self.flickr.test.login()['user']['id']
         self.status = {"total": 0, "current": 0, "message": "Idle"}
         self.cancelled = False
+        
+        # Configure session with retries for rate limiting
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=5,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def cancel(self):
         self.cancelled = True
@@ -89,7 +103,20 @@ class FlickrDetector:
             return None
 
         try:
-            resp = requests.get(best_url, timeout=10)
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            resp = self.session.get(best_url, timeout=15, headers=headers)
+            
+            if resp.status_code != 200:
+                print(f"Error processing {photo_id}: Status {resp.status_code} for URL {best_url}")
+                self.status["current"] += 1
+                return None
+
+            content_type = resp.headers.get('Content-Type', '')
+            if 'image' not in content_type:
+                print(f"Error processing {photo_id}: Invalid content type '{content_type}'")
+                self.status["current"] += 1
+                return None
+
             img = Image.open(BytesIO(resp.content))
             h = imagehash.phash(img)
             db.save_hash(photo_id, str(h), best_url, p['title'], p.get('datetaken', ''), width, height)
@@ -100,7 +127,10 @@ class FlickrDetector:
                 'date_taken': p.get('datetaken', '0000-00-00')
             }
         except Exception as e:
-            print(f"Error processing {photo_id}: {e}")
+            msg = f"Error processing {photo_id}: {str(e)}"
+            if 'resp' in locals():
+                msg += f" (Status: {resp.status_code}, Type: {resp.headers.get('Content-Type')})"
+            print(msg)
             self.status["current"] += 1
             return None
 
