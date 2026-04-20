@@ -10,6 +10,7 @@ venv/
 # Local database & results
 hashes.db
 duplicates.json
+photo_cache.json
 
 # Python bytecode
 __pycache__/

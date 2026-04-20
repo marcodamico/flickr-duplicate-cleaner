@@ -139,11 +139,11 @@ function updateProgress(status) {
 
     let displayMsg = status.message;
     if (status.total > 0) {
-        displayMsg += ` (${Math.round(percent)}%)`;
+        displayMsg += ` (${status.current} / ${status.total}, ${Math.round(percent)}%)`;
     }
 
     statusMsg.innerText = displayMsg;
-    statusEl.innerText = status.message;
+    statusEl.innerText = `${status.message} (${status.current} / ${status.total})`;
 
     // Ensure buttons reflect the running state
     if (status.is_running) {
@@ -232,6 +232,10 @@ async function checkInitialStatus() {
     try {
         const res = await fetch("/api/status");
         const status = await res.json();
+
+        if (status.db_count !== undefined) {
+            statusEl.innerText = `Ready. ${status.db_count} photos already in local database.`;
+        }
 
         if (status.is_running) {
             startPolling();

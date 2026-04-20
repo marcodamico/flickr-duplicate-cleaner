@@ -57,6 +57,7 @@ def scan_duplicates():
 def get_status():
     status = detector.status.copy()
     status["is_running"] = scan_thread is not None and scan_thread.is_alive()
+    status["db_count"] = db.get_hash_count()
     return jsonify(status)
 
 @app.route("/api/cancel", methods=["POST"])
