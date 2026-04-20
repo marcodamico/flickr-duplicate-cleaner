@@ -7,6 +7,7 @@ import json
 import threading
 import os
 from detector import FlickrDetector
+import db
 from dotenv import load_dotenv
 
 # Load environment variables from .env
