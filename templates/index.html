@@ -1,0 +1,54 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flickr Duplicate Cleaner</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>Flickr Duplicate Cleaner</h1>
+                <div id="status">Ready to scan or review</div>
+            </div>
+            <div class="controls">
+                <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                    <label style="font-size: 0.75rem; color: var(--text-dim); font-weight: 600;">SIMILARITY LEVEL</label>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <input type="number" id="threshold" value="5" min="1" max="64">
+                        <span style="font-size: 0.75rem; color: var(--text-dim);">(5=Exact, 15=Similar)</span>
+                    </div>
+                </div>
+                
+                <label class="checkbox-container" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; margin-top: 1rem;">
+                    <input type="checkbox" id="globalSearch"> Search Entire Library (Slow)
+                </label>
+
+                <button id="scanBtn" class="primary" style="margin-left: 1rem;" onclick="startScan()">
+                    <span>🔍</span> Find & Compare
+                </button>
+            </div>
+        </header>
+
+        <div id="progressContainer" class="progress-container" style="display: none;">
+            <h2 id="status-title">Scan in Progress</h2>
+            <div class="progress-bar-bg">
+                <div id="progressBarFill" class="progress-bar-fill"></div>
+            </div>
+            <div id="status-msg">Initializing...</div>
+        </div>
+
+        <main id="container">
+            <!-- Pairs will be injected here -->
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

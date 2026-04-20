@@ -1,0 +1,56 @@
+# db.py
+import sqlite3
+import os
+
+DB_PATH = "hashes.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hashes (
+            photo_id TEXT PRIMARY KEY,
+            hash TEXT,
+            url TEXT,
+            title TEXT,
+            date_taken TEXT,
+            width INTEGER,
+            height INTEGER
+        )
+    ''')
+    
+    # Check if we need to add width/height columns to an existing table
+    cursor.execute("PRAGMA table_info(hashes)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'width' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN width INTEGER")
+    if 'height' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN height INTEGER")
+        
+    conn.commit()
+    conn.close()
+
+def get_hash(photo_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT hash, url, title, width, height FROM hashes WHERE photo_id = ?', (photo_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def save_hash(photo_id, hash_str, url, title, date_taken, width=None, height=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO hashes (photo_id, hash, url, title, date_taken, width, height)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (photo_id, hash_str, url, title, date_taken, width, height))
+    conn.commit()
+    conn.close()
+
+def clear_db():
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+    init_db()
+
+init_db()

@@ -1,0 +1,24 @@
+# Environment secrets
+.env
+
+# Virtual environment
+flickr/
+env/
+venv/
+.venv/
+
+# Local database & results
+hashes.db
+duplicates.json
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
