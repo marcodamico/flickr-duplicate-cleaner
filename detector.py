@@ -38,8 +38,8 @@ class FlickrDetector:
         # Configure session with retries for rate limiting
         self.session = requests.Session()
         retry_strategy = Retry(
-            total=5,
-            backoff_factor=1,
+            total=10,
+            backoff_factor=2,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET"]
         )
@@ -160,7 +160,7 @@ class FlickrDetector:
         self.cancelled = False
 
         processed_photos = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             results = list(executor.map(self.process_single_photo, photos))
             processed_photos = [r for r in results if r is not None]
 
