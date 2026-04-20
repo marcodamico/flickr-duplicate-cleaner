@@ -11,6 +11,8 @@ from tqdm import tqdm
 from collections import defaultdict
 import json
 import os
+import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 import db
 import itertools
@@ -34,18 +36,32 @@ class FlickrDetector:
         self.user_id = self.flickr.test.login()['user']['id']
         self.status = {"total": 0, "current": 0, "message": "Idle"}
         self.cancelled = False
-        
-        # Configure session with retries for rate limiting
+        self._lock = threading.Lock()
+        # Global rate limiter: minimum 0.25s between requests across all workers
+        self._rate_lock = threading.Lock()
+        self._last_request_time = 0.0
+
+        # Configure session with retries only for server errors (not 429, which blocks threads too long)
         self.session = requests.Session()
         retry_strategy = Retry(
-            total=10,
-            backoff_factor=2,
-            status_forcelist=[429, 500, 502, 503, 504],
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
             allowed_methods=["GET"]
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
+
+    def _rate_limited_get(self, url, **kwargs):
+        """Enforce a minimum gap between requests to avoid triggering CDN rate limits."""
+        with self._rate_lock:
+            now = time.time()
+            wait = max(0.0, self._last_request_time + 0.25 - now)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request_time = time.time()
+        return self.session.get(url, **kwargs)
 
     def cancel(self):
         self.cancelled = True
@@ -75,15 +91,16 @@ class FlickrDetector:
         # ... (rest of the file remains functionally the same, but I'll provide the start again)
         photo_id = p['id']
         cached = db.get_hash(photo_id)
-        if cached and cached[3] and cached[4]:
-            self.status["current"] += 1
+        if cached and cached[0]:  # cached[0] is the hash string; width/height may be 0 (falsy) but still valid
+            with self._lock:
+                self.status["current"] += 1
             return {
                 'id': photo_id,
                 'hash': imagehash.hex_to_hash(cached[0]),
                 'title': cached[2],
                 'url': cached[1],
-                'width': cached[3],
-                'height': cached[4],
+                'width': cached[3] or 0,
+                'height': cached[4] or 0,
                 'date_taken': p.get('datetaken', '0000-00-00')
             }
 
@@ -99,28 +116,42 @@ class FlickrDetector:
                 break
 
         if not best_url:
-            self.status["current"] += 1
+            with self._lock:
+                self.status["current"] += 1
             return None
 
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            resp = self.session.get(best_url, timeout=15, headers=headers)
+
+            # Use rate-limited get; retry 429 with short exponential backoff
+            resp = None
+            for attempt in range(5):
+                resp = self._rate_limited_get(best_url, timeout=15, headers=headers)
+                if resp.status_code == 429:
+                    wait = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
+                    print(f"Rate limited on {photo_id}, waiting {wait}s (attempt {attempt + 1})")
+                    time.sleep(wait)
+                else:
+                    break
             
             if resp.status_code != 200:
                 print(f"Error processing {photo_id}: Status {resp.status_code} for URL {best_url}")
-                self.status["current"] += 1
+                with self._lock:
+                    self.status["current"] += 1
                 return None
 
             content_type = resp.headers.get('Content-Type', '')
             if 'image' not in content_type:
                 print(f"Error processing {photo_id}: Invalid content type '{content_type}'")
-                self.status["current"] += 1
+                with self._lock:
+                    self.status["current"] += 1
                 return None
 
             img = Image.open(BytesIO(resp.content))
             h = imagehash.phash(img)
             db.save_hash(photo_id, str(h), best_url, p['title'], p.get('datetaken', ''), width, height)
-            self.status["current"] += 1
+            with self._lock:
+                self.status["current"] += 1
             return {
                 'id': photo_id,
                 'hash': h, 'title': p['title'], 'url': best_url, 'width': width, 'height': height,
@@ -128,10 +159,11 @@ class FlickrDetector:
             }
         except Exception as e:
             msg = f"Error processing {photo_id}: {str(e)}"
-            if 'resp' in locals():
+            if resp is not None:
                 msg += f" (Status: {resp.status_code}, Type: {resp.headers.get('Content-Type')})"
             print(msg)
-            self.status["current"] += 1
+            with self._lock:
+                self.status["current"] += 1
             return None
 
     def find_duplicates(self, threshold=5, global_search=False, use_cache=False):
