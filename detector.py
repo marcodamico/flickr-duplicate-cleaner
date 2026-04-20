@@ -134,8 +134,26 @@ class FlickrDetector:
             self.status["current"] += 1
             return None
 
-    def find_duplicates(self, threshold=5, global_search=False):
-        photos = self.get_all_photos()
+    def find_duplicates(self, threshold=5, global_search=False, use_cache=False):
+        photos = []
+        cache_file = "photo_cache.json"
+
+        if use_cache and os.path.exists(cache_file):
+            try:
+                self.status["message"] = "Using cached photo list..."
+                with open(cache_file, "r") as f:
+                    photos = json.load(f)
+            except Exception as e:
+                print(f"Cache load error: {e}")
+                photos = self.get_all_photos()
+        else:
+            photos = self.get_all_photos()
+            try:
+                with open(cache_file, "w") as f:
+                    json.dump(photos, f)
+            except Exception as e:
+                print(f"Cache save error: {e}")
+
         self.status["total"] = len(photos)
         self.status["current"] = 0
         self.status["message"] = "Hashing images..."

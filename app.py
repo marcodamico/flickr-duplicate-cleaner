@@ -18,10 +18,10 @@ detector = FlickrDetector()
 scan_thread = None
 scan_results = []
 
-def run_scan_in_background(threshold, global_search):
+def run_scan_in_background(threshold, global_search, use_cache):
     global scan_results
     try:
-        scan_results = detector.find_duplicates(threshold=threshold, global_search=global_search)
+        scan_results = detector.find_duplicates(threshold=threshold, global_search=global_search, use_cache=use_cache)
     except Exception as e:
         print(f"Scan error: {e}")
         detector.status["message"] = f"Error: {str(e)}"
@@ -44,11 +44,12 @@ def scan_duplicates():
     data = request.json
     threshold = data.get("threshold", 5)
     global_search = data.get("global_search", False)
+    use_cache = data.get("use_cache", False)
     
     if scan_thread and scan_thread.is_alive():
         return jsonify({"error": "Scan already in progress"}), 400
         
-    scan_thread = threading.Thread(target=run_scan_in_background, args=(threshold, global_search))
+    scan_thread = threading.Thread(target=run_scan_in_background, args=(threshold, global_search, use_cache))
     scan_thread.start()
     return jsonify({"status": "started"})
 

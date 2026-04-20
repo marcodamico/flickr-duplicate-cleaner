@@ -76,6 +76,7 @@ function renderPairs(data) {
 async function startScan() {
     const threshold = parseInt(thresholdEl.value);
     const global_search = globalSearchEl.checked;
+    const use_cache = document.getElementById("useCache").checked;
 
     scanBtn.disabled = true;
     scanBtn.classList.add("loading");
@@ -86,7 +87,7 @@ async function startScan() {
         const res = await fetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ threshold, global_search })
+            body: JSON.stringify({ threshold, global_search, use_cache })
         });
         const data = await res.json();
 
