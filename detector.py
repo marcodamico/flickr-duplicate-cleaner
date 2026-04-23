@@ -37,6 +37,7 @@ class FlickrDetector:
         self.status = {"total": 0, "current": 0, "message": "Idle"}
         self.cancelled = False
         self._lock = threading.Lock()
+        self._hash_cache = {}  # Bulk-loaded at scan start; avoids per-photo DB connections
         self._stop_event = threading.Event()  # Set on cancel/shutdown to interrupt sleeps
         # Global rate limiter: minimum 0.25s between requests across all workers
         self._rate_lock = threading.Lock()
@@ -90,9 +91,8 @@ class FlickrDetector:
     def process_single_photo(self, p):
         if self.cancelled:
             return None
-        # ... (rest of the file remains functionally the same, but I'll provide the start again)
         photo_id = p['id']
-        cached = db.get_hash(photo_id)
+        cached = self._hash_cache.get(photo_id)
         if cached and cached[0]:  # cached[0] is the hash string; width/height may be 0 (falsy) but still valid
             with self._lock:
                 self.status["current"] += 1
@@ -192,14 +192,48 @@ class FlickrDetector:
 
         self.status["total"] = len(photos)
         self.status["current"] = 0
-        self.status["message"] = "Hashing images..."
         self.cancelled = False
-        self._stop_event.clear()  # Reset stop signal for this new scan
+        self._stop_event.clear()
 
+        self.status["message"] = "Loading hash cache..."
+        self._hash_cache = db.get_all_hashes()
+
+        # Pass 1: serve cached photos from memory in the main thread.
+        # Using a thread pool here causes GIL contention that starves Flask's
+        # status-poll responses, making the UI appear frozen.
+        self.status["message"] = "Processing photos..."
         processed_photos = []
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(self.process_single_photo, photos))
-            processed_photos = [r for r in results if r is not None]
+        uncached_photos = []
+        for i, p in enumerate(photos):
+            if self.cancelled:
+                break
+            photo_id = p['id']
+            cached = self._hash_cache.get(photo_id)
+            if cached and cached[0]:
+                processed_photos.append({
+                    'id': photo_id,
+                    'hash': imagehash.hex_to_hash(cached[0]),
+                    'title': cached[2],
+                    'url': cached[1],
+                    'width': cached[3] or 0,
+                    'height': cached[4] or 0,
+                    'date_taken': p.get('datetaken', '0000-00-00')
+                })
+                with self._lock:
+                    self.status["current"] += 1
+            else:
+                uncached_photos.append(p)
+            # Yield every 500 photos so Flask's polling thread can be scheduled
+            if i % 500 == 0:
+                time.sleep(0)
+
+        # Pass 2: download and hash only the photos not yet in the DB.
+        # Thread pool is appropriate here since the bottleneck is network I/O.
+        if uncached_photos and not self.cancelled:
+            self.status["message"] = f"Downloading {len(uncached_photos)} new photos..."
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(executor.map(self.process_single_photo, uncached_photos))
+                processed_photos.extend(r for r in results if r is not None)
 
         duplicates = []
         if global_search:

@@ -41,6 +41,15 @@ def get_hash(photo_id):
     conn.close()
     return row
 
+def get_all_hashes():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT photo_id, hash, url, title, width, height FROM hashes')
+    rows = cursor.fetchall()
+    conn.close()
+    # {photo_id: (hash, url, title, width, height)}
+    return {row[0]: row[1:] for row in rows}
+
 def get_hash_count():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
