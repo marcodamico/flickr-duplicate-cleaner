@@ -84,6 +84,7 @@ def _handle_shutdown(signum, frame):
     """Cancel any running scan before exiting so threads can stop cleanly."""
     print("\nShutting down: cancelling scan...")
     detector.cancel()
+    os._exit(0)
 
 signal.signal(signal.SIGINT, _handle_shutdown)
 signal.signal(signal.SIGTERM, _handle_shutdown)
