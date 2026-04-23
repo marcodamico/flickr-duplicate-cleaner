@@ -55,6 +55,13 @@
                 onclick="cancelScan()">Cancel Scan</button>
         </div>
 
+        <div id="resultsToolbar" style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem;">
+            <button id="loadResultsBtn" class="secondary" onclick="loadSavedResults()">Load Previous Results</button>
+            <button id="loadMoreBtn" class="secondary" onclick="loadMoreResults()" style="display: none;">Load
+                More</button>
+            <div id="resultsSummary" style="font-size: 0.875rem; color: var(--text-dim);"></div>
+        </div>
+
         <main id="container">
             <!-- Pairs will be injected here -->
         </main>

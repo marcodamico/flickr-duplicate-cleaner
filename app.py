@@ -19,6 +19,25 @@ detector = FlickrDetector()
 
 scan_thread = None
 scan_results = []
+duplicates_cache = {"mtime": None, "data": []}
+duplicates_lock = threading.Lock()
+
+
+def _get_duplicates_data():
+    duplicates_file = "duplicates.json"
+    if not os.path.exists(duplicates_file):
+        return []
+
+    mtime = os.path.getmtime(duplicates_file)
+    with duplicates_lock:
+        if duplicates_cache["mtime"] != mtime:
+            try:
+                with open(duplicates_file) as f:
+                    duplicates_cache["data"] = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                duplicates_cache["data"] = []
+            duplicates_cache["mtime"] = mtime
+        return duplicates_cache["data"]
 
 def run_scan_in_background(threshold, global_search, use_cache):
     global scan_results
@@ -35,10 +54,20 @@ def index():
 @app.route("/api/duplicates")
 def get_duplicates():
     try:
-        with open("duplicates.json") as f:
-            return jsonify(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return jsonify([])
+        offset = max(0, int(request.args.get("offset", 0)))
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except ValueError:
+        return jsonify({"error": "Invalid pagination parameters"}), 400
+
+    data = _get_duplicates_data()
+    total = len(data)
+    items = data[offset:offset + limit]
+    return jsonify({
+        "items": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit
+    })
 
 @app.route("/api/scan", methods=["POST"])
 def scan_duplicates():
@@ -81,7 +110,6 @@ def delete_photo():
         return jsonify({"error": str(e)}), 500
 
 def _handle_shutdown(signum, frame):
-    """Cancel any running scan before exiting so threads can stop cleanly."""
     print("\nShutting down: cancelling scan...")
     detector.cancel()
     os._exit(0)
