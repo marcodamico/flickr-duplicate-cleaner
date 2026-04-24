@@ -6,6 +6,7 @@ const statusEl = document.getElementById("status");
 const scanBtn = document.getElementById("scanBtn");
 const thresholdEl = document.getElementById("threshold");
 const globalSearchEl = document.getElementById("globalSearch");
+const scanModeEl = document.getElementById("scanMode");
 const mainContainer = document.getElementById("container");
 const progressContainer = document.getElementById("progressContainer");
 const progressBarFill = document.getElementById("progressBarFill");
@@ -33,6 +34,7 @@ let pollInterval = null;
 let loadingResults = false;
 let renderedGroups = 0;
 let totalGroups = 0;
+let currentScanMode = "duplicates";
 const groupsById = new Map();
 const selectedByGroup = new Map();
 const compactByGroup = new Map();
@@ -98,13 +100,29 @@ function setProgressState({
 
 function updateResultsSummary() {
     if (totalGroups === 0) {
-        resultsSummary.innerText = "No saved duplicate groups found.";
+        if (currentScanMode === "nsfw") {
+            resultsSummary.innerText = "No saved NSFW matches found.";
+        } else {
+            resultsSummary.innerText = "No saved duplicate groups found.";
+        }
         loadMoreBtn.style.display = "none";
         return;
     }
 
-    resultsSummary.innerText = `Showing ${renderedGroups.toLocaleString()} of ${totalGroups.toLocaleString()} groups.`;
+    if (currentScanMode === "nsfw") {
+        resultsSummary.innerText = `Showing ${renderedGroups.toLocaleString()} of ${totalGroups.toLocaleString()} nudity matches.`;
+    } else {
+        resultsSummary.innerText = `Showing ${renderedGroups.toLocaleString()} of ${totalGroups.toLocaleString()} groups.`;
+    }
     loadMoreBtn.style.display = renderedGroups < totalGroups ? "inline-flex" : "none";
+}
+
+function getResultEndpoint() {
+    return currentScanMode === "nsfw" ? "/api/nsfw-results" : "/api/duplicates";
+}
+
+function getMinimumGroupSize() {
+    return currentScanMode === "nsfw" ? 1 : 2;
 }
 
 function getSelectedSet(groupId) {
@@ -132,6 +150,10 @@ function createGroupCard(group) {
 
     const photosHtml = group.photos.map((photo, idx) => {
         const safeTitle = escapeHtml(photo.title || "Untitled");
+        const nsfwLabel = escapeHtml(photo.nsfw_label || "unknown");
+        const nsfwScore = Number.isFinite(photo.nsfw_score)
+            ? ` • NSFW score ${(photo.nsfw_score * 100).toFixed(1)}%`
+            : "";
         return `
             <article class="group-photo" data-photo-id="${photo.id}">
                 <label class="photo-checkline">
@@ -142,7 +164,7 @@ function createGroupCard(group) {
                     <img loading="lazy" decoding="async" src="${photo.url}" alt="${safeTitle}" onerror="this.src='https://placehold.co/300x200?text=Image+Not+Found'"/>
                 </button>
                 <div class="photo-title" title="${safeTitle}">${safeTitle}</div>
-                <div class="photo-meta">Original: ${formatRes(photo.original_width, photo.original_height)} • Preview: ${formatRes(photo.width, photo.height)} • ID ${photo.id}</div>
+                <div class="photo-meta">Original: ${formatRes(photo.original_width, photo.original_height)} • Preview: ${formatRes(photo.width, photo.height)} • ID ${photo.id}${currentScanMode === "nsfw" ? ` • Label ${nsfwLabel}${nsfwScore}` : ""}</div>
                 <a class="photo-original-link" href="${photo.original_url || photo.url}" target="_blank" rel="noopener noreferrer">Open Original</a>
             </article>
         `;
@@ -153,8 +175,8 @@ function createGroupCard(group) {
     card.innerHTML = `
         <header class="group-header">
             <div>
-                <h3>Group ${escapeHtml(group.group_id)}</h3>
-                <p>${group.size} photos • Avg diff ${group.avg_diff}</p>
+                <h3>${currentScanMode === "nsfw" ? "NSFW Match" : "Group"} ${escapeHtml(group.group_id)}</h3>
+                <p>${group.size} photos${currentScanMode === "nsfw" ? "" : ` • Avg diff ${group.avg_diff}`}</p>
             </div>
             <div class="group-actions">
                 <button class="secondary toggle-compact" type="button" data-group-id="${group.group_id}">
@@ -164,6 +186,7 @@ function createGroupCard(group) {
                     <input class="select-all" type="checkbox" data-group-id="${group.group_id}">
                     <span>Select all</span>
                 </label>
+                <button class="secondary resolve-selected" type="button" data-group-id="${group.group_id}" disabled>Resolve selected</button>
                 <button class="danger delete-selected" type="button" data-group-id="${group.group_id}" disabled>Delete selected</button>
             </div>
         </header>
@@ -188,10 +211,13 @@ function syncGroupControls(groupId) {
     const selectedCount = allIds.filter((id) => selected.has(id)).length;
 
     const selectAll = card.querySelector(".select-all");
+    const resolveBtn = card.querySelector(".resolve-selected");
     const deleteBtn = card.querySelector(".delete-selected");
 
     deleteBtn.disabled = selectedCount === 0;
+    resolveBtn.disabled = selectedCount === 0;
     deleteBtn.textContent = selectedCount > 0 ? `Delete selected (${selectedCount})` : "Delete selected";
+    resolveBtn.textContent = selectedCount > 0 ? `Resolve selected (${selectedCount})` : "Resolve selected";
 
     selectAll.checked = selectedCount > 0 && selectedCount === allIds.length;
     selectAll.indeterminate = selectedCount > 0 && selectedCount < allIds.length;
@@ -229,15 +255,16 @@ async function loadSavedResults(reset = true) {
     loadingResults = true;
     try {
         const offset = reset ? 0 : renderedGroups;
+        const targetName = currentScanMode === "nsfw" ? "nudity matches" : "duplicate groups";
 
         setProgressState({
             title: "Loading Saved Results",
-            message: `Fetching duplicate groups (${offset.toLocaleString()} loaded)...`,
+            message: `Fetching ${targetName} (${offset.toLocaleString()} loaded)...`,
             show: true,
             indeterminate: true
         });
 
-        const res = await fetch(`/api/duplicates?offset=${offset}&limit=${PAGE_SIZE}`);
+        const res = await fetch(`${getResultEndpoint()}?offset=${offset}&limit=${PAGE_SIZE}`);
         const payload = await res.json();
 
         if (payload.error) {
@@ -252,10 +279,14 @@ async function loadSavedResults(reset = true) {
         if (reset) {
             renderedGroups = 0;
             if (totalGroups === 0) {
-                mainContainer.innerHTML = `<div class="empty-state">No duplicate groups found yet. Start a scan with your chosen similarity level.</div>`;
+                mainContainer.innerHTML = currentScanMode === "nsfw"
+                    ? `<div class="empty-state">No NSFW matches found yet. Start an NSFW scan to detect nudity and possible nudity.</div>`
+                    : `<div class="empty-state">No duplicate groups found yet. Start a scan with your chosen similarity level.</div>`;
                 updateResultsSummary();
                 setProgressState({ show: false });
-                statusEl.innerText = "Ready. No saved duplicate groups to display.";
+                statusEl.innerText = currentScanMode === "nsfw"
+                    ? "Ready. No saved NSFW matches to display."
+                    : "Ready. No saved duplicate groups to display.";
                 return;
             }
         }
@@ -273,11 +304,15 @@ async function loadSavedResults(reset = true) {
         renderedGroups += items.length;
 
         updateResultsSummary();
-        statusEl.innerText = `Ready. Loaded ${renderedGroups.toLocaleString()} / ${totalGroups.toLocaleString()} groups.`;
+        statusEl.innerText = currentScanMode === "nsfw"
+            ? `Ready. Loaded ${renderedGroups.toLocaleString()} / ${totalGroups.toLocaleString()} NSFW matches.`
+            : `Ready. Loaded ${renderedGroups.toLocaleString()} / ${totalGroups.toLocaleString()} groups.`;
         setProgressState({ show: false });
     } catch (e) {
         console.error(e);
-        statusEl.innerText = "Error loading duplicate groups.";
+        statusEl.innerText = currentScanMode === "nsfw"
+            ? "Error loading NSFW matches."
+            : "Error loading duplicate groups.";
         setProgressState({ show: false });
     } finally {
         loadingResults = false;
@@ -288,6 +323,7 @@ async function startScan() {
     const threshold = parseInt(thresholdEl.value, 10);
     const global_search = globalSearchEl.checked;
     const use_cache = document.getElementById("useCache").checked;
+    currentScanMode = scanModeEl.value === "nsfw" ? "nsfw" : "duplicates";
 
     scanBtn.disabled = true;
     scanBtn.classList.add("loading");
@@ -295,9 +331,11 @@ async function startScan() {
 
     setProgressState({
         title: "Scan in Progress",
-        message: global_search
-            ? "Initializing global exact scan (threshold ignored)..."
-            : "Initializing strict similarity scan...",
+        message: currentScanMode === "nsfw"
+            ? "Initializing NSFW scan (nudity + possible nudity)..."
+            : (global_search
+                ? "Initializing global exact scan (threshold ignored)..."
+                : "Initializing strict similarity scan..."),
         current: 0,
         total: 0,
         show: true,
@@ -309,7 +347,7 @@ async function startScan() {
         const res = await fetch("/api/scan", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ threshold, global_search, use_cache })
+            body: JSON.stringify({ threshold, global_search, use_cache, scan_mode: currentScanMode })
         });
         const data = await res.json();
 
@@ -400,7 +438,9 @@ async function finishScan() {
 
     scanBtn.disabled = false;
     scanBtn.classList.remove("loading");
-    statusEl.innerText = "Scan complete. Review grouped results below.";
+    statusEl.innerText = currentScanMode === "nsfw"
+        ? "Scan complete. Review NSFW matches below."
+        : "Scan complete. Review grouped results below.";
 
     cancelBtn.disabled = false;
     cancelBtn.innerText = "Cancel Scan";
@@ -467,7 +507,7 @@ async function deleteSelectedInGroup(groupId) {
             const sel = getSelectedSet(groupId);
             successIds.forEach((id) => sel.delete(id));
 
-            if (group.photos.length < 2) {
+            if (group.photos.length < getMinimumGroupSize()) {
                 groupsById.delete(groupId);
                 selectedByGroup.delete(groupId);
                 compactByGroup.delete(groupId);
@@ -479,7 +519,9 @@ async function deleteSelectedInGroup(groupId) {
                 totalGroups = Math.max(0, totalGroups - 1);
                 updateResultsSummary();
                 if (groupsById.size === 0) {
-                    mainContainer.innerHTML = `<div class="empty-state">No duplicate groups remaining in loaded results.</div>`;
+                    mainContainer.innerHTML = currentScanMode === "nsfw"
+                        ? `<div class="empty-state">No NSFW matches remaining in loaded results.</div>`
+                        : `<div class="empty-state">No duplicate groups remaining in loaded results.</div>`;
                 }
             } else if (card) {
                 const replacement = createGroupCard(group);
@@ -504,6 +546,82 @@ async function deleteSelectedInGroup(groupId) {
     } catch (e) {
         console.error(e);
         alert("An error occurred while deleting selected photos.");
+    } finally {
+        syncGroupControls(groupId);
+    }
+}
+
+async function resolveSelectedInGroup(groupId) {
+    const group = groupsById.get(groupId);
+    if (!group) return;
+
+    const selected = Array.from(getSelectedSet(groupId));
+    if (selected.length === 0) return;
+
+    const confirmed = confirm(`Mark ${selected.length} selected photo(s) as resolved for this scan?`);
+    if (!confirmed) return;
+
+    const card = document.querySelector(`.group-card[data-group-id="${groupId}"]`);
+    const resolveBtn = card ? card.querySelector(".resolve-selected") : null;
+    if (resolveBtn) {
+        resolveBtn.disabled = true;
+        resolveBtn.textContent = "Resolving...";
+    }
+
+    try {
+        const res = await fetch("/api/resolve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ photo_ids: selected, mode: currentScanMode })
+        });
+        const payload = await res.json();
+        if (payload.error) {
+            alert("Resolve failed: " + payload.error);
+            syncGroupControls(groupId);
+            return;
+        }
+
+        const nextPhotos = group.photos.filter((photo) => !selected.includes(photo.id));
+        group.photos = nextPhotos;
+        sortGroupPhotosInPlace(group);
+        group.size = nextPhotos.length;
+
+        const sel = getSelectedSet(groupId);
+        selected.forEach((id) => sel.delete(id));
+
+        if (group.photos.length < getMinimumGroupSize()) {
+            groupsById.delete(groupId);
+            selectedByGroup.delete(groupId);
+            compactByGroup.delete(groupId);
+            if (card) card.remove();
+            if (lightboxState.groupId === groupId) {
+                closeLightbox();
+            }
+            renderedGroups = Math.max(0, renderedGroups - 1);
+            totalGroups = Math.max(0, totalGroups - 1);
+            updateResultsSummary();
+            if (groupsById.size === 0) {
+                mainContainer.innerHTML = currentScanMode === "nsfw"
+                    ? `<div class="empty-state">No NSFW matches remaining in loaded results.</div>`
+                    : `<div class="empty-state">No duplicate groups remaining in loaded results.</div>`;
+            }
+        } else if (card) {
+            const replacement = createGroupCard(group);
+            card.replaceWith(replacement);
+            syncGroupControls(groupId);
+            if (lightboxState.groupId === groupId) {
+                const currentPhoto = getCurrentLightboxPhoto();
+                if (!currentPhoto) {
+                    lightboxState.index = Math.max(0, group.photos.length - 1);
+                }
+                openLightbox(groupId, Math.min(lightboxState.index, group.photos.length - 1));
+            }
+        }
+
+        statusEl.innerText = `Marked ${selected.length} photo(s) as resolved in current scan.`;
+    } catch (e) {
+        console.error(e);
+        alert("An error occurred while resolving selected photos.");
     } finally {
         syncGroupControls(groupId);
     }
@@ -629,6 +747,16 @@ function loadMoreResults() {
     loadSavedResults(false);
 }
 
+function syncScanModeUi() {
+    currentScanMode = scanModeEl.value === "nsfw" ? "nsfw" : "duplicates";
+    const nsfwMode = currentScanMode === "nsfw";
+    thresholdEl.disabled = nsfwMode;
+    globalSearchEl.disabled = nsfwMode;
+    if (nsfwMode) {
+        globalSearchEl.checked = false;
+    }
+}
+
 async function checkInitialStatus() {
     try {
         const res = await fetch("/api/status");
@@ -702,6 +830,12 @@ mainContainer.addEventListener("click", (event) => {
         return;
     }
 
+    const resolveBtn = target.closest(".resolve-selected");
+    if (resolveBtn) {
+        resolveSelectedInGroup(resolveBtn.dataset.groupId);
+        return;
+    }
+
     const compactBtn = target.closest(".toggle-compact");
     if (compactBtn) {
         const groupId = compactBtn.dataset.groupId;
@@ -754,3 +888,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 checkInitialStatus();
+
+scanModeEl.addEventListener("change", () => {
+    syncScanModeUi();
+    loadSavedResults(true);
+});
+
+syncScanModeUi();

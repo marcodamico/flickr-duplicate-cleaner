@@ -29,6 +29,16 @@ def init_db():
         cursor.execute("ALTER TABLE hashes ADD COLUMN width INTEGER")
     if 'height' not in columns:
         cursor.execute("ALTER TABLE hashes ADD COLUMN height INTEGER")
+    if 'nsfw_score' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN nsfw_score REAL")
+    if 'nsfw_label' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN nsfw_label TEXT")
+    if 'nsfw_model' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN nsfw_model TEXT")
+    if 'nsfw_updated_at' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN nsfw_updated_at TEXT")
+    if 'nsfw_override' not in columns:
+        cursor.execute("ALTER TABLE hashes ADD COLUMN nsfw_override TEXT")
         
     conn.commit()
     conn.close()
@@ -74,6 +84,49 @@ def delete_hashes(photo_ids):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.executemany("DELETE FROM hashes WHERE photo_id = ?", [(pid,) for pid in photo_ids])
+    conn.commit()
+    conn.close()
+
+def get_all_nsfw():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT photo_id, nsfw_score, nsfw_label, nsfw_model, nsfw_updated_at, nsfw_override FROM hashes"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return {
+        row[0]: {
+            "score": row[1],
+            "label": row[2],
+            "model": row[3],
+            "updated_at": row[4],
+            "override": row[5],
+        }
+        for row in rows
+    }
+
+def save_nsfw(photo_id, score, label, model, updated_at):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE hashes
+        SET nsfw_score = ?, nsfw_label = ?, nsfw_model = ?, nsfw_updated_at = ?
+        WHERE photo_id = ?
+        """,
+        (score, label, model, updated_at, photo_id),
+    )
+    conn.commit()
+    conn.close()
+
+def save_nsfw_override(photo_id, override_value):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE hashes SET nsfw_override = ? WHERE photo_id = ?",
+        (override_value, photo_id),
+    )
     conn.commit()
     conn.close()
 

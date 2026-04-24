@@ -107,6 +107,14 @@ input[type="number"] {
   width: 60px;
 }
 
+select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+}
+
 .group-card {
   background: var(--panel);
   border-radius: var(--radius);
@@ -172,6 +180,7 @@ input[type="number"] {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  position: relative;
 }
 
 .photo-checkline {
@@ -214,6 +223,52 @@ input[type="number"] {
 .photo-meta {
   font-size: 0.72rem;
   color: var(--text-dim);
+}
+
+.nsfw-badge {
+  font-size: 0.68rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  width: fit-content;
+  border: 1px solid transparent;
+}
+
+.nsfw-badge.safe {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.nsfw-badge.possible_nsfw {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.nsfw-badge.nsfw {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.nsfw-badge.unknown {
+  color: var(--text-dim);
+  background: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.group-photo.blurred img {
+  filter: blur(10px);
+}
+
+.photo-reveal-btn {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
 }
 
 .photo-original-link {
@@ -359,6 +414,14 @@ input[type="number"] {
 .lightbox-open-original {
   grid-column: 1 / -1;
   justify-self: center;
+}
+
+.lightbox-nsfw-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 #lightboxCaption {

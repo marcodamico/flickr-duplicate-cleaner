@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from itertools import combinations
 
@@ -20,14 +20,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 import db
+from nsfw_detector import NsfwDetector, NSFW_MODEL_VERSION
 
-# Load environment variables from .env
 load_dotenv()
 
 API_KEY = os.getenv("FLICKR_API_KEY")
 API_SECRET = os.getenv("FLICKR_API_SECRET")
-
-
 class FlickrDetector:
     def __init__(self):
         if not API_KEY or not API_SECRET:
@@ -40,27 +38,30 @@ class FlickrDetector:
         self.cancelled = False
         self._lock = threading.Lock()
         self._hash_cache = {}
+        self._nsfw_cache = {}
+        self._nsfw_cache_lock = threading.Lock()
         self._stop_event = threading.Event()
 
         self._rate_lock = threading.Lock()
         self._last_request_time = 0.0
         self._original_info_cache = {}
+        self._nsfw_detector = NsfwDetector()
 
         self.session = requests.Session()
         retry_strategy = Retry(
             total=3,
             backoff_factor=0.5,
             status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET"],
+            allowed_methods=["GET", "HEAD"],
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
-    def _rate_limited_get(self, url, **kwargs):
+    def _rate_limited_get(self, url, min_interval=0.5, **kwargs):
         with self._rate_lock:
             now = time.time()
-            wait = max(0.0, self._last_request_time + 0.5 - now)
+            wait = max(0.0, self._last_request_time + float(min_interval) - now)
             if wait > 0:
                 self._stop_event.wait(timeout=wait)
             self._last_request_time = time.time()
@@ -95,7 +96,10 @@ class FlickrDetector:
             self._set_status(message=f"Fetching photo list (page {page})...")
             resp = self.flickr.people.getPhotos(
                 user_id=self.user_id,
-                extras="date_taken,url_k,width_k,height_k,url_b,width_b,height_b,url_o,width_o,height_o,url_m,width_m,height_m",
+                extras=(
+                    "date_taken,url_k,width_k,height_k,url_b,width_b,height_b,"
+                    "url_o,width_o,height_o,url_m,width_m,height_m"
+                ),
                 per_page=500,
                 page=page,
             )
@@ -117,10 +121,15 @@ class FlickrDetector:
         original_url=None,
         original_width=None,
         original_height=None,
+        nsfw_score=None,
+        nsfw_label="unknown",
+        nsfw_override=None,
     ):
         original_url = original_url or url
         original_width = int(original_width or 0)
         original_height = int(original_height or 0)
+        base_label = nsfw_label or "unknown"
+        resolved_label = nsfw_override if nsfw_override in {"safe", "possible_nsfw", "nsfw"} else base_label
         return {
             "id": photo_id,
             "hash": hash_obj,
@@ -132,6 +141,10 @@ class FlickrDetector:
             "original_url": original_url,
             "original_width": original_width,
             "original_height": original_height,
+            "nsfw_score": nsfw_score,
+            "nsfw_label": resolved_label,
+            "nsfw_base_label": base_label,
+            "nsfw_override": nsfw_override,
             "date_taken": date_taken or "0000-00-00",
         }
 
@@ -141,6 +154,7 @@ class FlickrDetector:
 
         photo_id = p["id"]
         cached = self._hash_cache.get(photo_id)
+        nsfw_cached = self._nsfw_cache.get(photo_id, {})
         if cached and cached[0]:
             self._increment_progress(1)
             return self._build_photo_record(
@@ -154,6 +168,9 @@ class FlickrDetector:
                 p.get("url_o"),
                 p.get("width_o"),
                 p.get("height_o"),
+                nsfw_cached.get("score"),
+                nsfw_cached.get("label") or "unknown",
+                nsfw_cached.get("override"),
             )
 
         best_url = None
@@ -226,6 +243,9 @@ class FlickrDetector:
                 p.get("url_o"),
                 p.get("width_o"),
                 p.get("height_o"),
+                None,
+                "unknown",
+                None,
             )
         except Exception as e:
             msg = f"Error processing {photo_id}: {str(e)}"
@@ -234,6 +254,107 @@ class FlickrDetector:
             print(msg)
             self._increment_progress(1)
             return None
+
+    def _nsfw_for_photo(self, photo):
+        photo_id = photo["id"]
+        cached = self._nsfw_cache.get(photo_id, {})
+        override = cached.get("override")
+        if (
+            cached.get("model") == NSFW_MODEL_VERSION
+            and cached.get("score") is not None
+            and cached.get("label")
+        ):
+            return cached.get("score"), cached.get("label"), override
+
+        try:
+            resp = self._rate_limited_get(photo["url"], timeout=15, min_interval=0.1)
+            if resp.status_code != 200:
+                return None, "unknown", override
+            img = Image.open(BytesIO(resp.content))
+            score, label = self._nsfw_detector.detect(img)
+            updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            db.save_nsfw(photo_id, float(score), label, NSFW_MODEL_VERSION, updated_at)
+            with self._nsfw_cache_lock:
+                self._nsfw_cache[photo_id] = {
+                    "score": float(score),
+                    "label": label,
+                    "model": NSFW_MODEL_VERSION,
+                    "updated_at": updated_at,
+                    "override": override,
+                }
+            return float(score), label, override
+        except Exception:
+            return None, "unknown", override
+
+    def _apply_nsfw(self, photos, nsfw_mode):
+        if nsfw_mode == "off":
+            for p in photos:
+                override = p.get("nsfw_override")
+                base = p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown"
+                p["nsfw_base_label"] = base
+                p["nsfw_label"] = override if override in {"safe", "possible_nsfw", "nsfw"} else base
+            return
+
+        self._set_status(
+            message="NSFW mode: scoring photos...",
+            total=max(1, len(photos)),
+            current=0,
+        )
+        allowed_override = {"safe", "possible_nsfw", "nsfw"}
+        to_score = []
+        done = 0
+        for idx, p in enumerate(photos):
+            if self.cancelled:
+                return
+            cached = self._nsfw_cache.get(p["id"], {})
+            override = cached.get("override")
+            if (
+                cached.get("model") == NSFW_MODEL_VERSION
+                and cached.get("score") is not None
+                and cached.get("label")
+            ):
+                score = cached.get("score")
+                label = cached.get("label")
+            else:
+                to_score.append((idx, p))
+                continue
+            p["nsfw_score"] = score
+            p["nsfw_base_label"] = label
+            p["nsfw_override"] = override
+            p["nsfw_label"] = override if override in allowed_override else label
+            done += 1
+            if done % 25 == 0:
+                self._set_status(current=done)
+
+        if not to_score:
+            self._set_status(current=done)
+            return
+
+        workers = min(8, max(2, os.cpu_count() or 4))
+        self._set_status(
+            message=f"NSFW mode: scoring {len(to_score)} uncached photos...",
+            current=done,
+        )
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(self._nsfw_for_photo, p): idx for idx, p in to_score}
+            for future in as_completed(futures):
+                if self.cancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
+                idx = futures[future]
+                p = photos[idx]
+                try:
+                    score, label, override = future.result()
+                except Exception:
+                    score, label, override = None, "unknown", p.get("nsfw_override")
+                p["nsfw_score"] = score
+                p["nsfw_base_label"] = label
+                p["nsfw_override"] = override
+                p["nsfw_label"] = override if override in allowed_override else label
+                done += 1
+                if done % 25 == 0:
+                    self._set_status(current=done)
+        self._set_status(current=done)
 
     def _bron_kerbosch(self, adjacency, r, p, x, cliques):
         if self.cancelled:
@@ -247,11 +368,7 @@ class FlickrDetector:
         if p or x:
             pivot = max(p | x, key=lambda v: len(adjacency[v] & p))
 
-        if pivot is None:
-            candidates = list(p)
-        else:
-            candidates = list(p - adjacency[pivot])
-
+        candidates = list(p) if pivot is None else list(p - adjacency[pivot])
         for v in candidates:
             if self.cancelled:
                 return
@@ -266,10 +383,8 @@ class FlickrDetector:
 
         adjacency = {i: set() for i in range(n)}
         edge_diff = {}
-
-        compared = 0
-        chunk = 3000
         remainder = 0
+
         for i in range(n):
             if self.cancelled:
                 return []
@@ -282,9 +397,8 @@ class FlickrDetector:
                     adjacency[i].add(j)
                     adjacency[j].add(i)
                     edge_diff[(i, j)] = int(diff)
-                compared += 1
                 remainder += 1
-                if remainder >= chunk:
+                if remainder >= 3000:
                     self._increment_progress(remainder)
                     remainder = 0
 
@@ -323,8 +437,7 @@ class FlickrDetector:
         for node_list, avg_diff in scored:
             if any(node in assigned for node in node_list):
                 continue
-            for node in node_list:
-                assigned.add(node)
+            assigned.update(node_list)
 
             photos_out = []
             for node in node_list:
@@ -339,6 +452,10 @@ class FlickrDetector:
                         "original_url": p.get("original_url") or p["url"],
                         "original_width": p.get("original_width") or 0,
                         "original_height": p.get("original_height") or 0,
+                        "nsfw_score": p.get("nsfw_score"),
+                        "nsfw_label": p.get("nsfw_label") or "unknown",
+                        "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
+                        "nsfw_override": p.get("nsfw_override"),
                     }
                 )
 
@@ -378,6 +495,10 @@ class FlickrDetector:
                     "original_url": p.get("original_url") or p["url"],
                     "original_width": p.get("original_width") or 0,
                     "original_height": p.get("original_height") or 0,
+                    "nsfw_score": p.get("nsfw_score"),
+                    "nsfw_label": p.get("nsfw_label") or "unknown",
+                    "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
+                    "nsfw_override": p.get("nsfw_override"),
                 }
                 for p in same_hash
             ]
@@ -396,7 +517,7 @@ class FlickrDetector:
         groups.sort(key=lambda g: (-g["size"], g["group_id"]))
         return groups
 
-    def find_duplicates(self, threshold=5, global_search=False, use_cache=False):
+    def _load_photos(self, use_cache=False):
         photos = []
         cache_file = "photo_cache.json"
 
@@ -415,13 +536,16 @@ class FlickrDetector:
                     json.dump(photos, f)
             except Exception as e:
                 print(f"Cache save error: {e}")
+        return photos
 
+    def _prepare_processed_photos(self, photos):
         self._set_status(total=len(photos), current=0)
         self.cancelled = False
         self._stop_event.clear()
 
         self._set_status(message="Loading hash cache...")
         self._hash_cache = db.get_all_hashes()
+        self._nsfw_cache = db.get_all_nsfw()
 
         self._set_status(message="Processing photos...")
         processed_photos = []
@@ -431,6 +555,7 @@ class FlickrDetector:
                 break
             photo_id = p["id"]
             cached = self._hash_cache.get(photo_id)
+            nsfw_cached = self._nsfw_cache.get(photo_id, {})
             if cached and cached[0]:
                 processed_photos.append(
                     self._build_photo_record(
@@ -444,6 +569,9 @@ class FlickrDetector:
                         p.get("url_o"),
                         p.get("width_o"),
                         p.get("height_o"),
+                        nsfw_cached.get("score"),
+                        nsfw_cached.get("label") or "unknown",
+                        nsfw_cached.get("override"),
                     )
                 )
                 self._increment_progress(1)
@@ -458,6 +586,17 @@ class FlickrDetector:
                 results = list(executor.map(self.process_single_photo, uncached_photos))
                 processed_photos.extend(r for r in results if r is not None)
 
+        return processed_photos
+
+    def find_duplicates(self, threshold=5, global_search=False, use_cache=False, nsfw_mode="off"):
+        photos = self._load_photos(use_cache=use_cache)
+        processed_photos = self._prepare_processed_photos(photos)
+
+        if self.cancelled:
+            self._set_status(message="Scan cancelled.")
+            return []
+
+        self._apply_nsfw(processed_photos, nsfw_mode)
         if self.cancelled:
             self._set_status(message="Scan cancelled.")
             return []
@@ -469,19 +608,14 @@ class FlickrDetector:
                 total=max(1, len(processed_photos)),
                 current=0,
             )
-
-            grouped_count = 0
-            chunk = 2500
+            done = 0
             for _ in processed_photos:
                 if self.cancelled:
                     break
-                grouped_count += 1
-                if grouped_count % chunk == 0:
-                    self._increment_progress(chunk)
-            remainder = grouped_count % chunk
-            if remainder:
-                self._increment_progress(remainder)
-
+                done += 1
+                if done % 2500 == 0:
+                    self._set_status(current=done)
+            self._set_status(current=done)
             groups = self._global_exact_groups(processed_photos)
         else:
             buckets = defaultdict(list)
@@ -525,8 +659,65 @@ class FlickrDetector:
         self.save_results(groups)
         return groups
 
+    def find_nsfw(self, use_cache=False, include_possible=True):
+        photos = self._load_photos(use_cache=use_cache)
+        processed_photos = self._prepare_processed_photos(photos)
+
+        if self.cancelled:
+            self._set_status(message="Scan cancelled.")
+            return []
+
+        self._apply_nsfw(processed_photos, nsfw_mode="nsfw")
+        if self.cancelled:
+            self._set_status(message="Scan cancelled.")
+            return []
+
+        allowed = {"nsfw", "possible_nsfw"} if include_possible else {"nsfw"}
+        matched = [p for p in processed_photos if (p.get("nsfw_label") or "unknown") in allowed]
+        matched.sort(
+            key=lambda p: (
+                0 if (p.get("nsfw_label") == "nsfw") else 1,
+                -(p.get("nsfw_score") or 0),
+                str(p.get("id") or ""),
+            )
+        )
+
+        groups = []
+        for idx, p in enumerate(matched):
+            groups.append(
+                {
+                    "group_id": f"nsfw-{idx}",
+                    "size": 1,
+                    "avg_diff": 0.0,
+                    "photos": [
+                        {
+                            "id": p["id"],
+                            "title": p["title"],
+                            "url": p["url"],
+                            "width": p["width"],
+                            "height": p["height"],
+                            "original_url": p.get("original_url") or p["url"],
+                            "original_width": p.get("original_width") or 0,
+                            "original_height": p.get("original_height") or 0,
+                            "nsfw_score": p.get("nsfw_score"),
+                            "nsfw_label": p.get("nsfw_label") or "unknown",
+                            "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
+                            "nsfw_override": p.get("nsfw_override"),
+                        }
+                    ],
+                }
+            )
+
+        self._set_status(message="Scan complete.")
+        self.save_nsfw_results(groups)
+        return groups
+
     def save_results(self, groups):
         with open("duplicates.json", "w") as f:
+            json.dump(groups, f, indent=2)
+
+    def save_nsfw_results(self, groups):
+        with open("nsfw_results.json", "w") as f:
             json.dump(groups, f, indent=2)
 
     def get_original_info(self, photo_id):

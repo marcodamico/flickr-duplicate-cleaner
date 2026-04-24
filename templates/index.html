@@ -39,6 +39,14 @@
                     <input type="checkbox" id="useCache" checked> Use cached photo list (Faster start)
                 </label>
 
+                <div style="display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem;">
+                    <label style="font-size: 0.75rem; color: var(--text-dim); font-weight: 600;">SCAN MODE</label>
+                    <select id="scanMode">
+                        <option value="duplicates">Duplicate Groups</option>
+                        <option value="nsfw">NSFW (nudity + possible)</option>
+                    </select>
+                </div>
+
                 <button id="scanBtn" class="primary" style="margin-left: 1rem;" onclick="startScan()">
                     <span>🔍</span> Find & Compare
                 </button>
@@ -61,6 +69,9 @@
                 More</button>
             <div id="resultsSummary" style="font-size: 0.875rem; color: var(--text-dim);"></div>
         </div>
+        <div style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.75rem;">
+            NSFW detection is assistive and can be wrong. Always review before deleting or resolving.
+        </div>
 
         <main id="container">
             <!-- Groups will be injected here -->
@@ -74,6 +85,11 @@
                 <img id="lightboxImage" src="" alt="Expanded preview">
                 <button id="lightboxNext" class="secondary lightbox-nav lightbox-next" type="button">Next</button>
                 <button id="lightboxOpenOriginal" class="secondary lightbox-open-original" type="button">Open Original</button>
+                <div class="lightbox-nsfw-actions">
+                    <button id="lightboxMarkSafe" class="secondary" type="button">Mark Safe</button>
+                    <button id="lightboxMarkNsfw" class="secondary" type="button">Mark NSFW</button>
+                    <button id="lightboxClearNsfw" class="secondary" type="button">Clear Mark</button>
+                </div>
                 <label id="lightboxSelectWrap" class="lightbox-select-wrap">
                     <input id="lightboxSelect" type="checkbox">
                     <span id="lightboxSelectLabel">Select this photo</span>
