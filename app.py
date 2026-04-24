@@ -39,6 +39,37 @@ def _get_duplicates_data():
             duplicates_cache["mtime"] = mtime
         return duplicates_cache["data"]
 
+
+def _remove_photos_from_duplicates(photo_ids):
+    if not photo_ids:
+        return
+
+    data = _get_duplicates_data()
+    changed = False
+    id_set = set(photo_ids)
+    next_groups = []
+    for group in data:
+        photos = group.get("photos", [])
+        kept = [p for p in photos if p.get("id") not in id_set]
+        if len(kept) != len(photos):
+            changed = True
+        if len(kept) >= 2:
+            updated = group.copy()
+            updated["photos"] = kept
+            updated["size"] = len(kept)
+            next_groups.append(updated)
+        elif len(kept) != len(photos):
+            changed = True
+
+    if not changed:
+        return
+
+    with duplicates_lock:
+        with open("duplicates.json", "w") as f:
+            json.dump(next_groups, f, indent=2)
+        duplicates_cache["data"] = next_groups
+        duplicates_cache["mtime"] = os.path.getmtime("duplicates.json")
+
 def run_scan_in_background(threshold, global_search, use_cache):
     global scan_results
     try:
@@ -60,6 +91,15 @@ def get_duplicates():
         return jsonify({"error": "Invalid pagination parameters"}), 400
 
     data = _get_duplicates_data()
+    # Legacy pair-format results are treated as stale and hidden.
+    if data and isinstance(data[0], dict) and "photos" not in data[0]:
+        return jsonify({
+            "items": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit
+        })
+
     total = len(data)
     items = data[offset:offset + limit]
     return jsonify({
@@ -106,6 +146,36 @@ def delete_photo():
     try:
         detector.flickr.photos.delete(photo_id=photo_id)
         return {"status": "ok"}
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/delete-batch", methods=["POST"])
+def delete_batch():
+    data = request.json or {}
+    photo_ids = data.get("photo_ids", [])
+    if not isinstance(photo_ids, list) or not photo_ids:
+        return jsonify({"error": "photo_ids must be a non-empty list"}), 400
+
+    results = []
+    successful_ids = []
+    for photo_id in photo_ids:
+        try:
+            detector.flickr.photos.delete(photo_id=photo_id)
+            successful_ids.append(photo_id)
+            results.append({"photo_id": photo_id, "status": "ok"})
+        except Exception as e:
+            results.append({"photo_id": photo_id, "status": "error", "error": str(e)})
+
+    if successful_ids:
+        db.delete_hashes(successful_ids)
+        _remove_photos_from_duplicates(successful_ids)
+
+    return jsonify({"results": results})
+
+@app.route("/api/photo-original-info/<photo_id>")
+def get_photo_original_info(photo_id):
+    try:
+        return jsonify(detector.get_original_info(photo_id))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

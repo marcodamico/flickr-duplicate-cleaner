@@ -31,7 +31,7 @@
 
                 <label class="checkbox-container"
                     style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; margin-top: 1rem;">
-                    <input type="checkbox" id="globalSearch"> Search Entire Library (Slow)
+                    <input type="checkbox" id="globalSearch"> Global Search: Exact Match Only (ignore date/threshold)
                 </label>
 
                 <label class="checkbox-container"
@@ -63,8 +63,25 @@
         </div>
 
         <main id="container">
-            <!-- Pairs will be injected here -->
+            <!-- Groups will be injected here -->
         </main>
+
+        <div id="lightboxModal" class="lightbox hidden" aria-hidden="true">
+            <div class="lightbox-overlay" id="lightboxOverlay"></div>
+            <div class="lightbox-content" role="dialog" aria-modal="true">
+                <button id="lightboxClose" class="secondary lightbox-close" type="button">Close</button>
+                <button id="lightboxPrev" class="secondary lightbox-nav lightbox-prev" type="button">Prev</button>
+                <img id="lightboxImage" src="" alt="Expanded preview">
+                <button id="lightboxNext" class="secondary lightbox-nav lightbox-next" type="button">Next</button>
+                <button id="lightboxOpenOriginal" class="secondary lightbox-open-original" type="button">Open Original</button>
+                <label id="lightboxSelectWrap" class="lightbox-select-wrap">
+                    <input id="lightboxSelect" type="checkbox">
+                    <span id="lightboxSelectLabel">Select this photo</span>
+                </label>
+                <div id="lightboxOriginalInfo" class="lightbox-original-info"></div>
+                <div id="lightboxCaption"></div>
+            </div>
+        </div>
 
         <footer
             style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--text-dim); font-size: 0.875rem;">

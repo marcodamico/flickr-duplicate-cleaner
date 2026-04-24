@@ -68,6 +68,15 @@ def save_hash(photo_id, hash_str, url, title, date_taken, width=None, height=Non
     conn.commit()
     conn.close()
 
+def delete_hashes(photo_ids):
+    if not photo_ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.executemany("DELETE FROM hashes WHERE photo_id = ?", [(pid,) for pid in photo_ids])
+    conn.commit()
+    conn.close()
+
 def clear_db():
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
