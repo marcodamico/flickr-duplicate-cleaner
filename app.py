@@ -324,6 +324,10 @@ def delete_photo():
     photo_id = request.json["photo_id"]
     try:
         detector.flickr.photos.delete(photo_id=photo_id)
+        db.delete_hashes([photo_id])
+        detector.mark_deleted_photos([photo_id])
+        _remove_photos_from_duplicates([photo_id])
+        _remove_photos_from_nsfw_results([photo_id])
         return {"status": "ok"}
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -347,6 +351,7 @@ def delete_batch():
 
     if successful_ids:
         db.delete_hashes(successful_ids)
+        detector.mark_deleted_photos(successful_ids)
         _remove_photos_from_duplicates(successful_ids)
         _remove_photos_from_nsfw_results(successful_ids)
 

@@ -106,6 +106,36 @@ class FlickrDetector:
         except Exception:
             pass
 
+    def mark_deleted_photos(self, photo_ids):
+        if not photo_ids:
+            return
+
+        ids = {str(pid) for pid in photo_ids if pid}
+        if not ids:
+            return
+
+        with self._missing_lock:
+            self._missing_photo_ids.update(ids)
+        self._save_missing_photo_ids()
+
+        for pid in ids:
+            self._hash_cache.pop(pid, None)
+            self._nsfw_cache.pop(pid, None)
+
+        if not os.path.exists(PHOTO_CACHE_FILE):
+            return
+        try:
+            with open(PHOTO_CACHE_FILE, "r") as f:
+                cached_photos = json.load(f)
+            if not isinstance(cached_photos, list):
+                return
+            filtered = [p for p in cached_photos if str((p or {}).get("id", "")) not in ids]
+            if len(filtered) != len(cached_photos):
+                with open(PHOTO_CACHE_FILE, "w") as f:
+                    json.dump(filtered, f)
+        except Exception:
+            pass
+
     def _rate_limited_get(self, url, min_interval=0.5, **kwargs):
         with self._rate_lock:
             now = time.time()
