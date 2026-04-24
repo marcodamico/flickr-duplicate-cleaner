@@ -381,6 +381,9 @@ function startPolling() {
             if (status.message === "Scan complete.") {
                 clearInterval(pollInterval);
                 finishScan();
+            } else if (!status.is_running && status.message.startsWith("Scan cancelled.")) {
+                clearInterval(pollInterval);
+                finishCancelledScan(status.message);
             } else if (status.message.startsWith("Error:")) {
                 clearInterval(pollInterval);
                 alert("Scan failed: " + status.message);
@@ -441,6 +444,17 @@ async function finishScan() {
     statusEl.innerText = currentScanMode === "nsfw"
         ? "Scan complete. Review NSFW matches below."
         : "Scan complete. Review grouped results below.";
+
+    cancelBtn.disabled = false;
+    cancelBtn.innerText = "Cancel Scan";
+}
+
+async function finishCancelledScan(message) {
+    await loadSavedResults(true);
+
+    scanBtn.disabled = false;
+    scanBtn.classList.remove("loading");
+    statusEl.innerText = `${message} Showing intermediate results.`;
 
     cancelBtn.disabled = false;
     cancelBtn.innerText = "Cancel Scan";

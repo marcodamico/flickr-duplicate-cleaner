@@ -524,7 +524,7 @@ class FlickrDetector:
 
         return groups
 
-    def _global_exact_groups(self, processed_photos):
+    def _global_exact_groups(self, processed_photos, check_cancel=True):
         hash_groups = defaultdict(list)
         for p in processed_photos:
             hash_groups[p["hash_str"]].append(p)
@@ -532,7 +532,7 @@ class FlickrDetector:
         groups = []
         group_counter = 0
         for _, same_hash in hash_groups.items():
-            if self.cancelled:
+            if check_cancel and self.cancelled:
                 return []
             if len(same_hash) < 2:
                 continue
@@ -567,6 +567,53 @@ class FlickrDetector:
             group_counter += 1
 
         groups.sort(key=lambda g: (-g["size"], g["group_id"]))
+        return groups
+
+    def _build_nsfw_groups(self, processed_photos, include_possible=True):
+        allowed = {"nsfw", "possible_nsfw"} if include_possible else {"nsfw"}
+        matched = [p for p in processed_photos if (p.get("nsfw_label") or "unknown") in allowed]
+        matched.sort(
+            key=lambda p: (
+                0 if (p.get("nsfw_label") == "nsfw") else 1,
+                -(p.get("nsfw_score") or 0),
+                str(p.get("id") or ""),
+            )
+        )
+
+        groups = []
+        for idx, p in enumerate(matched):
+            groups.append(
+                {
+                    "group_id": f"nsfw-{idx}",
+                    "size": 1,
+                    "avg_diff": 0.0,
+                    "photos": [
+                        {
+                            "id": p["id"],
+                            "title": p["title"],
+                            "url": p["url"],
+                            "width": p["width"],
+                            "height": p["height"],
+                            "original_url": p.get("original_url") or p["url"],
+                            "original_width": p.get("original_width") or 0,
+                            "original_height": p.get("original_height") or 0,
+                            "nsfw_score": p.get("nsfw_score"),
+                            "nsfw_label": p.get("nsfw_label") or "unknown",
+                            "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
+                            "nsfw_override": p.get("nsfw_override"),
+                        }
+                    ],
+                }
+            )
+        return groups
+
+    def _finalize_cancelled_scan(self, mode, groups):
+        if mode == "nsfw":
+            self.save_nsfw_results(groups)
+            self._set_status(message=f"Scan cancelled. Saved {len(groups)} partial NSFW matches.")
+        else:
+            self.save_results(groups)
+            self._set_status(message=f"Scan cancelled. Saved {len(groups)} partial groups.")
         return groups
 
     def _load_photos(self, use_cache=False):
@@ -661,17 +708,19 @@ class FlickrDetector:
     def find_duplicates(self, threshold=5, global_search=False, use_cache=False, nsfw_mode="off"):
         photos = self._load_photos(use_cache=use_cache)
         processed_photos = self._prepare_processed_photos(photos)
+        groups = []
 
         if self.cancelled:
-            self._set_status(message="Scan cancelled.")
-            return []
+            if global_search:
+                groups = self._global_exact_groups(processed_photos, check_cancel=False)
+            return self._finalize_cancelled_scan("duplicates", groups)
 
         self._apply_nsfw(processed_photos, nsfw_mode)
         if self.cancelled:
-            self._set_status(message="Scan cancelled.")
-            return []
+            if global_search:
+                groups = self._global_exact_groups(processed_photos, check_cancel=False)
+            return self._finalize_cancelled_scan("duplicates", groups)
 
-        groups = []
         if global_search:
             self._set_status(
                 message="Global exact scan: grouping identical photos regardless of date...",
@@ -686,7 +735,7 @@ class FlickrDetector:
                 if done % 2500 == 0:
                     self._set_status(current=done)
             self._set_status(current=done)
-            groups = self._global_exact_groups(processed_photos)
+            groups = self._global_exact_groups(processed_photos, check_cancel=not self.cancelled)
         else:
             buckets = defaultdict(list)
             for p in processed_photos:
@@ -722,8 +771,7 @@ class FlickrDetector:
             groups.sort(key=lambda g: (-g["size"], g["avg_diff"], g["group_id"]))
 
         if self.cancelled:
-            self._set_status(message="Scan cancelled.")
-            return []
+            return self._finalize_cancelled_scan("duplicates", groups)
 
         self._set_status(message="Scan complete.")
         self.save_results(groups)
@@ -734,49 +782,15 @@ class FlickrDetector:
         processed_photos = self._prepare_processed_photos(photos)
 
         if self.cancelled:
-            self._set_status(message="Scan cancelled.")
-            return []
+            groups = self._build_nsfw_groups(processed_photos, include_possible=include_possible)
+            return self._finalize_cancelled_scan("nsfw", groups)
 
         self._apply_nsfw(processed_photos, nsfw_mode="nsfw")
         if self.cancelled:
-            self._set_status(message="Scan cancelled.")
-            return []
+            groups = self._build_nsfw_groups(processed_photos, include_possible=include_possible)
+            return self._finalize_cancelled_scan("nsfw", groups)
 
-        allowed = {"nsfw", "possible_nsfw"} if include_possible else {"nsfw"}
-        matched = [p for p in processed_photos if (p.get("nsfw_label") or "unknown") in allowed]
-        matched.sort(
-            key=lambda p: (
-                0 if (p.get("nsfw_label") == "nsfw") else 1,
-                -(p.get("nsfw_score") or 0),
-                str(p.get("id") or ""),
-            )
-        )
-
-        groups = []
-        for idx, p in enumerate(matched):
-            groups.append(
-                {
-                    "group_id": f"nsfw-{idx}",
-                    "size": 1,
-                    "avg_diff": 0.0,
-                    "photos": [
-                        {
-                            "id": p["id"],
-                            "title": p["title"],
-                            "url": p["url"],
-                            "width": p["width"],
-                            "height": p["height"],
-                            "original_url": p.get("original_url") or p["url"],
-                            "original_width": p.get("original_width") or 0,
-                            "original_height": p.get("original_height") or 0,
-                            "nsfw_score": p.get("nsfw_score"),
-                            "nsfw_label": p.get("nsfw_label") or "unknown",
-                            "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
-                            "nsfw_override": p.get("nsfw_override"),
-                        }
-                    ],
-                }
-            )
+        groups = self._build_nsfw_groups(processed_photos, include_possible=include_possible)
 
         self._set_status(message="Scan complete.")
         self.save_nsfw_results(groups)
