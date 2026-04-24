@@ -26,6 +26,9 @@ load_dotenv()
 
 API_KEY = os.getenv("FLICKR_API_KEY")
 API_SECRET = os.getenv("FLICKR_API_SECRET")
+MISSING_PHOTOS_FILE = "missing_photos.json"
+PHOTO_CACHE_FILE = "photo_cache.json"
+
 class FlickrDetector:
     def __init__(self):
         if not API_KEY or not API_SECRET:
@@ -46,6 +49,8 @@ class FlickrDetector:
         self._last_request_time = 0.0
         self._original_info_cache = {}
         self._nsfw_detector = NsfwDetector()
+        self._missing_lock = threading.Lock()
+        self._missing_photo_ids = self._load_missing_photo_ids()
 
         self.session = requests.Session()
         retry_strategy = Retry(
@@ -57,6 +62,49 @@ class FlickrDetector:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
+
+    def _load_missing_photo_ids(self):
+        if not os.path.exists(MISSING_PHOTOS_FILE):
+            return set()
+        try:
+            with open(MISSING_PHOTOS_FILE, "r") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return set()
+            return {str(pid) for pid in data if pid}
+        except Exception:
+            return set()
+
+    def _save_missing_photo_ids(self):
+        try:
+            with open(MISSING_PHOTOS_FILE, "w") as f:
+                json.dump(sorted(self._missing_photo_ids), f, indent=2)
+        except Exception:
+            pass
+
+    def _mark_photo_missing(self, photo_id):
+        pid = str(photo_id)
+        changed = False
+        with self._missing_lock:
+            if pid not in self._missing_photo_ids:
+                self._missing_photo_ids.add(pid)
+                changed = True
+        if changed:
+            self._save_missing_photo_ids()
+
+        if not os.path.exists(PHOTO_CACHE_FILE):
+            return
+        try:
+            with open(PHOTO_CACHE_FILE, "r") as f:
+                cached_photos = json.load(f)
+            if not isinstance(cached_photos, list):
+                return
+            filtered = [p for p in cached_photos if str((p or {}).get("id", "")) != pid]
+            if len(filtered) != len(cached_photos):
+                with open(PHOTO_CACHE_FILE, "w") as f:
+                    json.dump(filtered, f)
+        except Exception:
+            pass
 
     def _rate_limited_get(self, url, min_interval=0.5, **kwargs):
         with self._rate_lock:
@@ -208,6 +256,8 @@ class FlickrDetector:
                     break
 
             if resp.status_code != 200:
+                if resp.status_code in (404, 410):
+                    self._mark_photo_missing(photo_id)
                 print(f"Error processing {photo_id}: status {resp.status_code} for URL {best_url}")
                 self._increment_progress(1)
                 return None
@@ -269,6 +319,8 @@ class FlickrDetector:
         try:
             resp = self._rate_limited_get(photo["url"], timeout=15, min_interval=0.1)
             if resp.status_code != 200:
+                if resp.status_code in (404, 410):
+                    self._mark_photo_missing(photo_id)
                 return None, "unknown", override
             img = Image.open(BytesIO(resp.content))
             score, label = self._nsfw_detector.detect(img)
@@ -519,18 +571,33 @@ class FlickrDetector:
 
     def _load_photos(self, use_cache=False):
         photos = []
-        cache_file = "photo_cache.json"
+        cache_file = PHOTO_CACHE_FILE
 
         if use_cache and os.path.exists(cache_file):
             try:
                 self._set_status(message="Using cached photo list...")
                 with open(cache_file, "r") as f:
                     photos = json.load(f)
+                if self._missing_photo_ids:
+                    before = len(photos)
+                    photos = [p for p in photos if str((p or {}).get("id", "")) not in self._missing_photo_ids]
+                    skipped = before - len(photos)
+                    if skipped > 0:
+                        self._set_status(
+                            message=f"Using cached photo list (skipped {skipped} deleted/missing photos)..."
+                        )
             except Exception as e:
                 print(f"Cache load error: {e}")
                 photos = self.get_all_photos()
         else:
             photos = self.get_all_photos()
+            if self._missing_photo_ids:
+                current_ids = {str((p or {}).get("id", "")) for p in photos}
+                stale = self._missing_photo_ids & current_ids
+                if stale:
+                    with self._missing_lock:
+                        self._missing_photo_ids -= stale
+                    self._save_missing_photo_ids()
             try:
                 with open(cache_file, "w") as f:
                     json.dump(photos, f)
@@ -554,6 +621,9 @@ class FlickrDetector:
             if self.cancelled:
                 break
             photo_id = p["id"]
+            if str(photo_id) in self._missing_photo_ids:
+                self._increment_progress(1)
+                continue
             cached = self._hash_cache.get(photo_id)
             nsfw_cached = self._nsfw_cache.get(photo_id, {})
             if cached and cached[0]:
