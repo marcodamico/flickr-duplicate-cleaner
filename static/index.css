@@ -450,6 +450,65 @@ select {
   color: var(--text-dim);
 }
 
+/* NSFW date group styling */
+.group-card.nsfw-group {
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.nsfw-date-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.nsfw-date-badge {
+  font-weight: 600;
+  color: var(--primary);
+  font-size: 0.9rem;
+  min-width: fit-content;
+}
+
+.nsfw-photo-count {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+/* Adjusted grid for multiple NSFW photos from same date */
+.group-grid.nsfw-multi-photo {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.6rem;
+}
+
+.group-grid.nsfw-multi-photo .group-photo {
+  padding: 0.35rem;
+}
+
+.group-grid.nsfw-multi-photo .photo-checkline {
+  font-size: 0.7rem;
+}
+
+.group-grid.nsfw-multi-photo .photo-title {
+  font-size: 0.75rem;
+  -webkit-line-clamp: 1;
+}
+
+.group-grid.nsfw-multi-photo .photo-meta {
+  font-size: 0.65rem;
+  display: none;
+}
+
+.group-grid.nsfw-multi-photo .photo-original-link {
+  font-size: 0.7rem;
+}
+
+.group-grid.nsfw-multi-photo .thumb-btn img {
+  width: 100px;
+  height: 75px;
+}
+
 @media (max-width: 900px) {
   header {
     flex-direction: column;

@@ -602,40 +602,65 @@ class FlickrDetector:
     def _build_nsfw_groups(self, processed_photos, include_possible=True):
         allowed = {"nsfw", "possible_nsfw"} if include_possible else {"nsfw"}
         matched = [p for p in processed_photos if (p.get("nsfw_label") or "unknown") in allowed]
-        matched.sort(
-            key=lambda p: (
-                0 if (p.get("nsfw_label") == "nsfw") else 1,
-                -(p.get("nsfw_score") or 0),
-                str(p.get("id") or ""),
+        
+        # Group by date_taken
+        date_groups = defaultdict(list)
+        for p in matched:
+            date_key = p.get("date_taken", "0000-00-00")[:10]  # Extract YYYY-MM-DD
+            date_groups[date_key].append(p)
+        
+        # Sort each date group by NSFW label (nsfw first) then by score (highest first) then by ID
+        for date_key in date_groups:
+            date_groups[date_key].sort(
+                key=lambda p: (
+                    0 if (p.get("nsfw_label") == "nsfw") else 1,
+                    -(p.get("nsfw_score") or 0),
+                    str(p.get("id") or ""),
+                )
             )
-        )
-
+        
+        # Sort date groups by most recent first
+        sorted_dates = sorted(date_groups.keys(), reverse=True)
+        
         groups = []
-        for idx, p in enumerate(matched):
+        group_counter = 0
+        for date_key in sorted_dates:
+            photos_in_date = date_groups[date_key]
+            
+            photos_out = [
+                {
+                    "id": p["id"],
+                    "title": p["title"],
+                    "url": p["url"],
+                    "width": p["width"],
+                    "height": p["height"],
+                    "original_url": p.get("original_url") or p["url"],
+                    "original_width": p.get("original_width") or 0,
+                    "original_height": p.get("original_height") or 0,
+                    "nsfw_score": p.get("nsfw_score"),
+                    "nsfw_label": p.get("nsfw_label") or "unknown",
+                    "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
+                    "nsfw_override": p.get("nsfw_override"),
+                }
+                for p in photos_in_date
+            ]
+            
+            # Calculate average score for this date group
+            avg_score = sum(p.get("nsfw_score") or 0 for p in photos_in_date) / len(photos_in_date) if photos_in_date else 0.0
+            
             groups.append(
                 {
-                    "group_id": f"nsfw-{idx}",
-                    "size": 1,
-                    "avg_diff": 0.0,
-                    "photos": [
-                        {
-                            "id": p["id"],
-                            "title": p["title"],
-                            "url": p["url"],
-                            "width": p["width"],
-                            "height": p["height"],
-                            "original_url": p.get("original_url") or p["url"],
-                            "original_width": p.get("original_width") or 0,
-                            "original_height": p.get("original_height") or 0,
-                            "nsfw_score": p.get("nsfw_score"),
-                            "nsfw_label": p.get("nsfw_label") or "unknown",
-                            "nsfw_base_label": p.get("nsfw_base_label") or p.get("nsfw_label") or "unknown",
-                            "nsfw_override": p.get("nsfw_override"),
-                        }
-                    ],
+                    "group_id": f"nsfw-date-{date_key}-{group_counter}",
+                    "size": len(photos_out),
+                    "avg_diff": round(float(avg_score), 2),  # Store avg NSFW score instead of diff
+                    "date": date_key,
+                    "photos": photos_out,
                 }
             )
+            group_counter += 1
+        
         return groups
+
 
     def _finalize_cancelled_scan(self, mode, groups):
         if mode == "nsfw":

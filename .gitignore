@@ -11,6 +11,7 @@ venv/
 hashes.db
 duplicates.json
 photo_cache.json
+missing_photos.json
 
 # Python bytecode
 __pycache__/

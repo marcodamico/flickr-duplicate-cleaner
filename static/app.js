@@ -147,6 +147,14 @@ function createGroupCard(group) {
     const card = document.createElement("section");
     card.className = "group-card";
     card.dataset.groupId = group.group_id;
+    
+    const isNsfwGroup = currentScanMode === "nsfw";
+    const isMultiPhotoNsfw = isNsfwGroup && group.size > 1;
+    
+    // Add NSFW styling if applicable
+    if (isNsfwGroup) {
+        card.classList.add("nsfw-group");
+    }
 
     const photosHtml = group.photos.map((photo, idx) => {
         const safeTitle = escapeHtml(photo.title || "Untitled");
@@ -164,19 +172,31 @@ function createGroupCard(group) {
                     <img loading="lazy" decoding="async" src="${photo.url}" alt="${safeTitle}" onerror="this.src='https://placehold.co/300x200?text=Image+Not+Found'"/>
                 </button>
                 <div class="photo-title" title="${safeTitle}">${safeTitle}</div>
-                <div class="photo-meta">Original: ${formatRes(photo.original_width, photo.original_height)} • Preview: ${formatRes(photo.width, photo.height)} • ID ${photo.id}${currentScanMode === "nsfw" ? ` • Label ${nsfwLabel}${nsfwScore}` : ""}</div>
+                <div class="photo-meta">Original: ${formatRes(photo.original_width, photo.original_height)} • Preview: ${formatRes(photo.width, photo.height)} • ID ${photo.id}${isNsfwGroup ? ` • Label ${nsfwLabel}${nsfwScore}` : ""}</div>
                 <a class="photo-original-link" href="${photo.original_url || photo.url}" target="_blank" rel="noopener noreferrer">Open Original</a>
             </article>
         `;
     }).join("");
 
     const isCompact = compactByGroup.get(group.group_id) === true;
+    
+    // Build date header for NSFW groups
+    const dateHeader = isNsfwGroup && group.date ? `
+        <div class="nsfw-date-header">
+            <span class="nsfw-date-badge">📅 ${escapeHtml(group.date)}</span>
+            <span class="nsfw-photo-count">${group.size} photo${group.size !== 1 ? 's' : ''}</span>
+        </div>
+    ` : "";
+    
+    const headerTitle = isNsfwGroup && group.date 
+        ? `NSFW Matches (${escapeHtml(group.date)})` 
+        : (currentScanMode === "nsfw" ? `NSFW Match ${escapeHtml(group.group_id)}` : `Group ${escapeHtml(group.group_id)}`);
 
     card.innerHTML = `
         <header class="group-header">
             <div>
-                <h3>${currentScanMode === "nsfw" ? "NSFW Match" : "Group"} ${escapeHtml(group.group_id)}</h3>
-                <p>${group.size} photos${currentScanMode === "nsfw" ? "" : ` • Avg diff ${group.avg_diff}`}</p>
+                <h3>${headerTitle}</h3>
+                <p>${group.size} photo${group.size !== 1 ? 's' : ''}${isNsfwGroup ? ` • Avg NSFW score ${(group.avg_diff * 100).toFixed(1)}%` : ` • Avg diff ${group.avg_diff}`}</p>
             </div>
             <div class="group-actions">
                 <button class="secondary toggle-compact" type="button" data-group-id="${group.group_id}">
@@ -190,7 +210,8 @@ function createGroupCard(group) {
                 <button class="danger delete-selected" type="button" data-group-id="${group.group_id}" disabled>Delete selected</button>
             </div>
         </header>
-        <div class="group-grid">
+        ${dateHeader}
+        <div class="group-grid${isMultiPhotoNsfw ? ' nsfw-multi-photo' : ''}">
             ${photosHtml}
         </div>
     `;
@@ -324,6 +345,52 @@ async function startScan() {
     const global_search = globalSearchEl.checked;
     const use_cache = document.getElementById("useCache").checked;
     currentScanMode = scanModeEl.value === "nsfw" ? "nsfw" : "duplicates";
+
+    // Check current status and previous results
+    try {
+        const statusRes = await fetch("/api/status");
+        const status = await statusRes.json();
+
+        const resultsRes = await fetch(getResultEndpoint() + "?offset=0&limit=1");
+        const resultsData = await resultsRes.json();
+        const hasPreviousResults = resultsData.total > 0;
+
+        if (status.is_running) {
+            // Scan in progress - ask to continue or start new
+            const choice = confirm(
+                "A scan is currently in progress. Would you like to:\n\n" +
+                "• OK: Continue the current scan\n" +
+                "• Cancel: Start a new scan (will cancel current one)"
+            );
+            if (choice) {
+                // Continue current scan
+                startPolling();
+                return;
+            } else {
+                // Cancel current and start new
+                await fetch("/api/cancel", { method: "POST" });
+                // Wait a moment for cancellation
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        } else if (hasPreviousResults) {
+            // Previous results exist - ask what to do
+            const choice = confirm(
+                `Previous ${currentScanMode === "nsfw" ? "NSFW" : "duplicate"} results found (${resultsData.total} groups).\n\n` +
+                "Would you like to:\n\n" +
+                "• OK: Load previous results\n" +
+                "• Cancel: Start a new scan"
+            );
+            if (choice) {
+                // Load previous results
+                loadSavedResults();
+                return;
+            }
+            // Continue to start new scan
+        }
+    } catch (e) {
+        console.error("Error checking scan status:", e);
+        // Continue with scan if we can't check status
+    }
 
     scanBtn.disabled = true;
     scanBtn.classList.add("loading");
